@@ -237,34 +237,61 @@ class L2SPFController(app_manager.RyuApp):
             in_port=in_port, actions=actions, data=data)
         datapath.send_msg(out)
 
-    def install_path_rules(self, path, dst_mac, final_port, tcp_pkt):
-        """Install flow rules on all switches in path"""
-        # Only install rules for TCP packets
-        if not tcp_pkt:
-            return
+    def install_path_rules(self, path, dst_mac, final_port, tcp_pkt, src_mac=None, src_port=None):
+        """Install flow rules on all switches in path (bidirectional for TCP)"""
         for i, switch_name in enumerate(path):
             switch_id = int(switch_name[1:])
             if switch_id not in self.datapaths:
                 continue
+            
             datapath = self.datapaths[switch_id]
             parser = datapath.ofproto_parser
-            # Determine output port
+            
+            # Determine forward output port
             if i < len(path) - 1:
                 next_switch_id = int(path[i+1][1:])
-                out_port = self.link_to_port[(switch_id, next_switch_id)]
+                fwd_out_port = self.link_to_port[(switch_id, next_switch_id)]
             else:
-                out_port = final_port
-            # Create TCP-specific match
-            match = parser.OFPMatch(
-                eth_type=0x0800,
-                eth_dst=dst_mac,
-                ip_proto=6,
-                tcp_src=tcp_pkt.src_port,
-                tcp_dst=tcp_pkt.dst_port)
-            priority = 10
+                fwd_out_port = final_port
+            
+            # === FORWARD DIRECTION ===
+            if tcp_pkt:
+                # TCP-specific match for per-flow ECMP
+                fwd_match = parser.OFPMatch(
+                    eth_type=0x0800,
+                    eth_dst=dst_mac,
+                    ip_proto=6,
+                    tcp_src=tcp_pkt.src_port,
+                    tcp_dst=tcp_pkt.dst_port)
+                priority = 10
+            else:
+                # Generic match for non-TCP
+                fwd_match = parser.OFPMatch(eth_dst=dst_mac)
+                priority = 5
+            
+            fwd_actions = [parser.OFPActionOutput(fwd_out_port)]
+            self.add_flow(datapath, priority, fwd_match, fwd_actions)
+            
+            # === REVERSE DIRECTION (for TCP only) ===
+            if tcp_pkt and src_mac and src_port is not None:
+                # Determine reverse output port
+                if i > 0:
+                    prev_switch_id = int(path[i-1][1:])
+                    rev_out_port = self.link_to_port[(switch_id, prev_switch_id)]
+                else:
+                    rev_out_port = src_port
+                
+                # Reverse match (swap src/dst ports)
+                rev_match = parser.OFPMatch(
+                    eth_type=0x0800,
+                    eth_dst=src_mac,
+                    ip_proto=6,
+                    tcp_src=tcp_pkt.dst_port,  # Swapped!
+                    tcp_dst=tcp_pkt.src_port)  # Swapped!
+                
+                rev_actions = [parser.OFPActionOutput(rev_out_port)]
+                self.add_flow(datapath, priority, rev_match, rev_actions)
 
-            actions = [parser.OFPActionOutput(out_port)]
-            self.add_flow(datapath, priority, match, actions)
 
     def get_outport(self, switch_id, path, final_port):
         """Get output port for switch given path"""
