@@ -29,7 +29,7 @@ end
 # unset irrelevant variables
 deactivate nondestructive
 
-set -gx VIRTUAL_ENV "/home/baadalvm/ryu-venv"
+set -gx VIRTUAL_ENV "/home/prithviraj/Downloads/COL334-A3/ryu-venv"
 
 set -gx _OLD_VIRTUAL_PATH $PATH
 set -gx PATH "$VIRTUAL_ENV/bin" $PATH

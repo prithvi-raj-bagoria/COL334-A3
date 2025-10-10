@@ -37,7 +37,7 @@ deactivate () {
 # unset irrelevant variables
 deactivate nondestructive
 
-VIRTUAL_ENV="/home/baadalvm/ryu-venv"
+VIRTUAL_ENV="/home/prithviraj/Downloads/COL334-A3/ryu-venv"
 export VIRTUAL_ENV
 
 _OLD_VIRTUAL_PATH="$PATH"
