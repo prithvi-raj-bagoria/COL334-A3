@@ -10,6 +10,26 @@ from pathlib import Path
 import random
 import time
 
+def enable_ospf_debugging(net, meta_ospf):
+    """Enable OSPF debugging on all routers"""
+    import time
+    
+    print("*** Enabling OSPF debugging on routers...")
+    
+    # FIX: meta_ospf['routers'] is a LIST, not a dict!
+    for rname in meta_ospf['routers']:  # ← Changed from .keys() to direct iteration
+        router = net.get(rname)
+        if router:
+            # Enable LSA and event debugging
+            router.cmd('vtysh -c "debug ospf lsa"')
+            router.cmd('vtysh -c "debug ospf event"')
+            router.cmd('vtysh -c "log file /tmp/ospf_{}.log"'.format(rname))
+            print(f"  ✓ Debugging enabled on {rname} -> /tmp/ospf_{rname}.log")
+    
+    time.sleep(1)
+
+
+
 def if_down_up(net, edge, down=True):
     """Bring both sides of a router-router link down/up."""
     ri, rj = net.get(edge["s_i"]), net.get(edge["s_j"])
@@ -35,14 +55,15 @@ def start_iperf(h1, h2, h1_ip, h2_ip, total_seconds, prefer_iperf3=True):
         h1.cmd(f"iperf -c {ip} -t {int(total_seconds)} -i 1 > {c_log} 2>&1 &")
     return s_log, c_log
 
-def link_flap_exp(net, e, h1_ip, h2_ip, iperf_time = 15, link_down_duration = 5, link_down_time = 2):
+
+def link_flap_exp(net, e, h1_ip, h2_ip, iperf_time = 30, link_down_duration = 5, wait_before_link_down = 2):
     """Choose distinct edges and flap them in sequence."""
     h1, h2 = net.get("h1"), net.get("h2")
     s_log, c_log = start_iperf(h1, h2, h1_ip, h2_ip, iperf_time)
 
     print(f"*** iperf running: client log {c_log}, server log {s_log}")
 
-    time.sleep(link_down_time)
+    time.sleep(wait_before_link_down)
 
     key = (e["s_i"], e["s_j"], e["i_if"], e["j_if"])
     print(f"DOWN {e['s_i']}:{e['i_if']} <-> {e['s_j']}:{e['j_if']} for {link_down_duration}s")
@@ -52,7 +73,7 @@ def link_flap_exp(net, e, h1_ip, h2_ip, iperf_time = 15, link_down_duration = 5,
     if_down_up(net, e, down=False)
 
     print("*** Flaps done; waiting a few seconds for iperf to finish…")
-    time.sleep(iperf_time-link_down_duration-link_down_time)
+    time.sleep(iperf_time-link_down_duration-wait_before_link_down+5)
 
     c_out = h1.cmd(f"tail -n +1 {c_log} || true")
     s_out = h2.cmd(f"tail -n +1 {s_log} || true")
@@ -64,7 +85,7 @@ def main():
     ap = argparse.ArgumentParser(description="Mininet + FRR OSPF with link flaps and iperf.")
     ap.add_argument("--input-file", required=True, help="config json for OSPF")
     ap.add_argument("--subnet-start", default="10.10", help="pool start as 'A.B' (default 10.10)")
-    ap.add_argument("--converge-timeout", type=int, default=120, help="Seconds to wait for initial convergence")
+    ap.add_argument("--converge-timeout", type=int, default=60, help="Seconds to wait for initial convergence")
     ap.add_argument("--flap-iters", type=int, default=1, help="How many flap cycles")
     ap.add_argument("--stabilize", type=int, default=40, help="Seconds to wait after bringing link UP")
     ap.add_argument("--no-cli", action="store_true", help="Exit after test (no Mininet CLI)")
@@ -82,10 +103,10 @@ def main():
     # 1) Topology
     net = build()
     meta_ospf = generate_meta_ospf(config)
-    
     try:
         # 2) FRR
         start_frr_ospf(net, meta_ospf)
+        enable_ospf_debugging(net, meta_ospf)
 
         # 3) Convergence
         print(f"*** Waiting for OSPF convergence (<= {args.converge_timeout}s)…")
@@ -95,10 +116,12 @@ def main():
         else:
             print("⚠️  OSPF did not converge within timeout; continuing anyway.")
 
+        #CLI(net)
+
         # 4) Link flap experiment
         e = None
         for x in meta_ospf["edges"]:
-            if x["s_i"] == "s2" and x["s_j"] == "s3":
+            if x["s_i"] == "s1" and x["s_j"] == "s2":
                 e = x
         c_log, s_log, c_out, s_out = link_flap_exp(
             net, e, h1_ip=H1_IP, h2_ip=H2_IP)

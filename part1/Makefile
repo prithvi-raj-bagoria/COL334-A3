@@ -4,13 +4,13 @@
 RYU=ryu-manager
 TOPO=sudo python3 p1_topo.py
 
-.PHONY: hub switch topo
+.PHONY: p1_hub switch topo
 
 hub:
-	$(RYU) hub.py
+	$(RYU) p1_hub.py
 
-switch:
-	$(RYU) switch.py
+p1_learning:
+	$(RYU) p1_learning.py
 
 topo:
 	$(TOPO)
